@@ -69,6 +69,16 @@ const orderSchema: Schema<IOrder> = new mongoose.Schema(
       required: false,
     },
     initDate: { type: Date, default: Date.now() },
+
+    emailStatus: {
+      type: String,
+      enum: ["sent", "failed"],
+      required: false,
+    },
+    emailError: {
+      type: String,
+      required: false,
+    },
   },
 
   { timestamps: true }

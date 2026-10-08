@@ -1,7 +1,11 @@
 require("dotenv").config();
-import nodemailer, { Transporter } from "nodemailer";
+import { Resend } from "resend";
 import ejs from "ejs";
 import path from "path";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+const FROM_ADDRESS = "orders@dev-style.com";
 
 interface EmailOptions {
   email: string;
@@ -10,45 +14,85 @@ interface EmailOptions {
   data: { [key: string]: any };
 }
 
-const sendMail = async (options: EmailOptions): Promise<void> => {
-  const transporter: Transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    service: process.env.SMTP_SERVICE,
-    auth: {
-      user: process.env.SMTP_MAIL,
-      pass: process.env.SMTP_PASSWORD
-    },
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
+export interface SendMailResult {
+  success: boolean;
+  error?: string;
+}
 
+const isTestMode = (): boolean => process.env.EMAIL_TEST_MODE === "true";
+
+// In test mode every send is redirected to EMAIL_TEST_RECIPIENT so testing
+// never reaches a real customer or the real admin inbox.
+const resolveRecipient = (intended: string): string => {
+  if (!isTestMode()) return intended;
+
+  const testRecipient = process.env.EMAIL_TEST_RECIPIENT;
+  if (!testRecipient) {
+    throw new Error(
+      "EMAIL_TEST_MODE is enabled but EMAIL_TEST_RECIPIENT is not set"
+    );
+  }
+  return testRecipient;
+};
+
+const sendMail = async (options: EmailOptions): Promise<SendMailResult> => {
   const { email, subject, template, data } = options;
 
-  // get the pdath to the email template file
+  // get the path to the email template file
   const templatePath = path.join(__dirname, "../mails", template);
 
-  // Render the email template with EJS
-  const html: string  = await ejs.renderFile(templatePath, data);
+  // Render the email template with EJS (unchanged from the Nodemailer version)
+  const html: string = await ejs.renderFile(templatePath, data);
 
-  const mailOptionsSEND = {
-    from: process.env.SMTP_MAIL,
-    to: email,
+  if (isTestMode()) {
+    console.log(
+      `[sendMail] EMAIL_TEST_MODE active - redirecting all sends to ${process.env.EMAIL_TEST_RECIPIENT} ` +
+        `(intended customer: ${email}, intended admin: ${process.env.ADMIN_NOTIFICATION_EMAIL})`
+    );
+  }
+
+  const customerRecipient = resolveRecipient(email);
+
+  const { error: customerError } = await resend.emails.send({
+    from: FROM_ADDRESS,
+    to: customerRecipient,
     subject,
-    html
-  };
+    html,
+  });
 
-  await transporter.sendMail(mailOptionsSEND);
+  if (customerError) {
+    const message = customerError.message ?? String(customerError);
+    console.error("[sendMail] customer email failed to send:", customerError);
+    return { success: false, error: `customer email failed: ${message}` };
+  }
 
-    const mailOptionsACK = {
-    from: process.env.SMTP_MAIL,
-    to: process.env.SMTP_MAIL ,
+  const adminAddress = process.env.ADMIN_NOTIFICATION_EMAIL;
+  if (!adminAddress) {
+    console.error(
+      "[sendMail] ADMIN_NOTIFICATION_EMAIL is not set - skipping admin notification copy"
+    );
+    return {
+      success: false,
+      error: "admin email failed: ADMIN_NOTIFICATION_EMAIL is not set",
+    };
+  }
+
+  const adminRecipient = resolveRecipient(adminAddress);
+
+  const { error: adminError } = await resend.emails.send({
+    from: FROM_ADDRESS,
+    to: adminRecipient,
     subject: "New order received",
-    html
-  };
+    html,
+  });
 
-  await transporter.sendMail(mailOptionsACK);
+  if (adminError) {
+    const message = adminError.message ?? String(adminError);
+    console.error("[sendMail] admin notification email failed to send:", adminError);
+    return { success: false, error: `admin email failed: ${message}` };
+  }
+
+  return { success: true };
 };
 
 export default sendMail;

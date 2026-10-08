@@ -97,6 +97,8 @@ export interface IOrder extends mongoose.Document {
   paymentMethod:string;
   number?: number;
   initDate: Date;
+  emailStatus?: string;
+  emailError?: string;
 }
 
 export interface IPartner extends mongoose.Document {

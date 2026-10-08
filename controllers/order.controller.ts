@@ -2,8 +2,6 @@ import { NextFunction, Request, Response } from "express";
 import { CatchAsyncError } from "../middleware/catchAsyncErrors";
 import ErrorHandler from "../utils/ErrorHandler";
 import userModel from "../models/user.model";
-import path from "path";
-import ejs from "ejs";
 import sendMail from "../utils/sendMail";
 import { getAllOrdersService, newOrder } from "../services/order.service";
 import { redis } from "../utils/redis";
@@ -21,6 +19,38 @@ export const createOrder = CatchAsyncError(
       const { goodies, name, email, number, city, district,expeditionAdresse,paymentMethod, status, initDate } =
         req.body as IOrder;
 
+      const mailData = {
+        order: {
+          _id: Math.random() * 100000000,
+          name: name,
+          goodies: goodies,
+          status: status,
+          email: email,
+          initDate: new Date().toLocaleDateString("in-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          }),
+        },
+      };
+
+      const emailResult = await sendMail({
+        email: mailData.order.email ?? process.env.ADMIN_NOTIFICATION_EMAIL ?? "",
+        subject: "Order confirmation",
+        template: "order-confirmation.ejs",
+        data: mailData,
+      }).catch((error) => ({
+        success: false,
+        error: error?.message ?? String(error),
+      }));
+
+      if (!emailResult.success) {
+        console.error(
+          `[createOrder] order confirmation email failed for ${email}:`,
+          emailResult.error
+        );
+      }
+
       const data = {
         name,
         goodies,
@@ -32,41 +62,11 @@ export const createOrder = CatchAsyncError(
         number,
         status,
         initDate,
+        emailStatus: emailResult.success ? "sent" : "failed",
+        emailError: emailResult.success ? undefined : emailResult.error,
       };
 
       console.log("order i send to you", data);
-
-      const mailData = {
-        order: {
-          _id: Math.random() * 100000000,
-          name: name,
-          goodies: goodies,
-          status: status,
-          email: email, 
-          // email: process.env.SMTP_MAIL,  // send to devstyle
-          initDate: new Date().toLocaleDateString("in-US", {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-          }),
-        },
-      };
-
-      const html = await ejs.renderFile(
-        path.join(__dirname, "../mails/order-confirmation.ejs"),
-        { order: mailData }
-      );
-
-      try {
-        await sendMail({
-          email: mailData.order.email ?? process.env.SMTP_MAIL ?? "",
-          subject: "Order confirmation",
-          template: "order-confirmation.ejs",
-          data: mailData,
-        });
-      } catch (error) {
-        console.log(error);
-      }
 
       const newOrder = await OrderModel.create(data);
 
@@ -158,21 +158,26 @@ export const editOrder = CatchAsyncError(
           },
         };
 
-        const html = await ejs.renderFile(
-          path.join(__dirname, "../mails/order-confirmation.ejs"),
-          { order: mailData }
-        );
+        const emailResult = await sendMail({
+          email: email,
+          subject: "Order confirmation",
+          template: "order-confirmation.ejs",
+          data: mailData,
+        }).catch((error) => ({
+          success: false,
+          error: error?.message ?? String(error),
+        }));
 
-        try {
-          await sendMail({
-            email: email,
-            subject: "Order confirmation",
-            template: "order-confirmation.ejs",
-            data: mailData,
-          });
-        } catch (error) {
-          console.log(error);
+        if (!emailResult.success) {
+          console.error(
+            `[editOrder] order confirmation email failed for ${email}:`,
+            emailResult.error
+          );
         }
+
+        order.emailStatus = emailResult.success ? "sent" : "failed";
+        order.emailError = emailResult.success ? undefined : emailResult.error;
+        await order.save();
       }
 
       res.status(200).json({
