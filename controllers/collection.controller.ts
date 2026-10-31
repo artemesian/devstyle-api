@@ -78,7 +78,9 @@ export const getOneCollectionAndGoodies = CatchAsyncError(
       const goodies = await GoodieModel.find({
         fromCollection: collection?._id,
         show: true
-      });
+      })
+        .populate("fromCollection")
+        .populate("sizes");
 
       res.status(200).json({
         message: {

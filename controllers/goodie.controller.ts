@@ -169,7 +169,9 @@ export const getSingleGoodie = CatchAsyncError(
 export const getAllGoodies = CatchAsyncError(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const goodies = await GoodieModel.find({ show: true });
+      const goodies = await GoodieModel.find({ show: true })
+        .populate("fromCollection")
+        .populate("sizes");
       // sort by alphabetical order
       goodies.sort((a, b) => a.name.localeCompare(b.name));
       
@@ -283,6 +285,8 @@ export const getNewGoodies = CatchAsyncError(
     try {
       const skipCount = parseInt(req.headers.skip as string, 10);
       const goodies = await GoodieModel.find({ show: true })
+        .populate("fromCollection")
+        .populate("sizes")
         .skip(skipCount)
         .limit(4)
         .sort({ createdAt: -1 });
@@ -304,6 +308,8 @@ export const getHotGoodies = CatchAsyncError(
       const skipCount = parseInt(req.headers.skip as string, 10);
 
       const goodies = await GoodieModel.find({ show: true })
+        .populate("fromCollection")
+        .populate("sizes")
         .skip(skipCount)
         .sort({ views: -1, likes: -1 })
         .limit(8);
